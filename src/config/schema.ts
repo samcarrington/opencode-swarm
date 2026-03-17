@@ -436,7 +436,23 @@ export type CompactionAdvisoryConfig = z.infer<
 export const LintConfigSchema = z.object({
 	enabled: z.boolean().default(true),
 	mode: z.enum(['check', 'fix']).default('check'),
-	linter: z.enum(['biome', 'eslint', 'auto']).default('auto'),
+	linter: z
+		.enum([
+			'auto',
+			'biome',
+			'eslint',
+			'ruff',
+			'clippy',
+			'golangci-lint',
+			'checkstyle',
+			'ktlint',
+			'dotnet-format',
+			'cppcheck',
+			'swiftlint',
+			'dart-analyze',
+			'rubocop',
+		])
+		.default('auto'),
 	patterns: z
 		.array(z.string())
 		.default([

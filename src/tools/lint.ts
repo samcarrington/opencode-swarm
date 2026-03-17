@@ -2,6 +2,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { tool } from '@opencode-ai/plugin';
 import { isCommandAvailable } from '../build/discovery';
+import { loadPluginConfig } from '../config/loader';
 import { warn } from '../utils';
 import { createSwarmTool } from './create-tool';
 
@@ -574,6 +575,26 @@ export const lint: ReturnType<typeof tool> = createSwarmTool({
 
 		const { mode } = args;
 		const cwd = directory;
+
+		// Check for a project-level preferred linter in config
+		// This allows projects to override the default biome-first detection order
+		const config = loadPluginConfig(cwd);
+		const preferredLinter = config.lint?.linter;
+
+		if (preferredLinter && preferredLinter !== 'auto') {
+			// Use the project-configured linter directly, bypassing auto-detection
+			if (preferredLinter === 'biome' || preferredLinter === 'eslint') {
+				const result = await runLint(preferredLinter, mode, directory);
+				return JSON.stringify(result, null, 2);
+			}
+			// Additional language linter (ruff, clippy, golangci-lint, etc.)
+			const result = await runAdditionalLint(
+				preferredLinter as AdditionalLinter,
+				mode,
+				cwd,
+			);
+			return JSON.stringify(result, null, 2);
+		}
 
 		// Primary: detect Biome or ESLint (JS/TS projects)
 		const linter = await detectAvailableLinter();

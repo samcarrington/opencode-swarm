@@ -240,6 +240,152 @@ tokio = { version = "1.0", features = ["full"] }
 		const framework = await detectTestFramework();
 		expect(framework).toBe('pester');
 	});
+
+	test('detects pytest from requirements-dev.txt', async () => {
+		fs.writeFileSync('requirements-dev.txt', 'pytest>=7.0.0\nblack>=23.0.0\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('pytest');
+	});
+
+	test('detects pytest from requirements_dev.txt', async () => {
+		fs.writeFileSync('requirements_dev.txt', 'pytest>=7.0.0\ncoverage>=7.0.0\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('pytest');
+	});
+
+	test('detects pytest from requirements-test.txt', async () => {
+		fs.writeFileSync('requirements-test.txt', 'pytest>=7.0.0\npytest-cov>=4.0.0\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('pytest');
+	});
+
+	test('detects pytest from requirements_test.txt', async () => {
+		fs.writeFileSync('requirements_test.txt', 'pytest>=7.0.0\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('pytest');
+	});
+});
+
+describe('test-runner.ts - Subfolder Framework Detection', () => {
+	let tempDir: string;
+	let originalCwd: string;
+
+	beforeEach(() => {
+		tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'test-runner-subfolder-'));
+		originalCwd = process.cwd();
+		process.chdir(tempDir);
+	});
+
+	afterEach(() => {
+		process.chdir(originalCwd);
+		setTimeout(() => {
+			try {
+				fs.rmSync(tempDir, { recursive: true, force: true });
+			} catch {
+				// Ignore cleanup errors
+			}
+		}, 100);
+	});
+
+	test('detects pytest in a subfolder (monorepo backend)', async () => {
+		// Simulate a monorepo: root has no test config, backend/ has pytest
+		const backendDir = path.join(tempDir, 'backend');
+		fs.mkdirSync(backendDir);
+		fs.writeFileSync(path.join(backendDir, 'requirements.txt'), 'pytest>=7.0.0\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('pytest');
+	});
+
+	test('detects pytest from requirements-dev.txt in a subfolder', async () => {
+		const backendDir = path.join(tempDir, 'backend');
+		fs.mkdirSync(backendDir);
+		fs.writeFileSync(path.join(backendDir, 'requirements-dev.txt'), 'pytest>=7.0.0\nblack\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('pytest');
+	});
+
+	test('detects vitest in a subfolder (monorepo frontend)', async () => {
+		const frontendDir = path.join(tempDir, 'frontend');
+		fs.mkdirSync(frontendDir);
+		fs.writeFileSync(
+			path.join(frontendDir, 'package.json'),
+			JSON.stringify({
+				scripts: { test: 'vitest run' },
+				devDependencies: { vitest: '^1.0.0' },
+			}),
+		);
+		const framework = await detectTestFramework();
+		expect(framework).toBe('vitest');
+	});
+
+	test('detects jest in a subfolder', async () => {
+		const appDir = path.join(tempDir, 'app');
+		fs.mkdirSync(appDir);
+		fs.writeFileSync(
+			path.join(appDir, 'package.json'),
+			JSON.stringify({
+				scripts: { test: 'jest' },
+				devDependencies: { jest: '^29.0.0' },
+			}),
+		);
+		const framework = await detectTestFramework();
+		expect(framework).toBe('jest');
+	});
+
+	test('detects pytest from pyproject.toml in a subfolder', async () => {
+		const backendDir = path.join(tempDir, 'backend');
+		fs.mkdirSync(backendDir);
+		fs.writeFileSync(
+			path.join(backendDir, 'pyproject.toml'),
+			`[tool.pytest.ini_options]\ntestpaths = ["tests"]\n`,
+		);
+		const framework = await detectTestFramework();
+		expect(framework).toBe('pytest');
+	});
+
+	test('root directory framework takes precedence over subfolder', async () => {
+		// Root has pytest
+		fs.writeFileSync(path.join(tempDir, 'requirements.txt'), 'pytest>=7.0.0\n');
+		// Subfolder has jest
+		const frontendDir = path.join(tempDir, 'frontend');
+		fs.mkdirSync(frontendDir);
+		fs.writeFileSync(
+			path.join(frontendDir, 'package.json'),
+			JSON.stringify({
+				scripts: { test: 'jest' },
+				devDependencies: { jest: '^29.0.0' },
+			}),
+		);
+		const framework = await detectTestFramework();
+		// Root wins
+		expect(framework).toBe('pytest');
+	});
+
+	test('skips node_modules when scanning subfolders', async () => {
+		// Only framework is in node_modules (should be skipped)
+		const nodeModDir = path.join(tempDir, 'node_modules', 'some-pkg');
+		fs.mkdirSync(nodeModDir, { recursive: true });
+		fs.writeFileSync(path.join(nodeModDir, 'requirements.txt'), 'pytest>=7.0.0\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('none');
+	});
+
+	test('skips hidden directories when scanning subfolders', async () => {
+		// Only framework is in .hidden dir (should be skipped)
+		const hiddenDir = path.join(tempDir, '.hidden');
+		fs.mkdirSync(hiddenDir);
+		fs.writeFileSync(path.join(hiddenDir, 'requirements.txt'), 'pytest>=7.0.0\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('none');
+	});
+
+	test('returns none when no framework in root or subfolders', async () => {
+		const subDir = path.join(tempDir, 'src');
+		fs.mkdirSync(subDir);
+		fs.writeFileSync(path.join(subDir, 'main.py'), '# no test framework config\n');
+		const framework = await detectTestFramework();
+		expect(framework).toBe('none');
+	});
 });
 
 describe('test-runner.ts - Validation Tests (no execution)', () => {

@@ -294,10 +294,48 @@ function detectMinitest(cwd: string): boolean {
 	);
 }
 
-export async function detectTestFramework(
-	cwd?: string,
+/**
+ * Directories to skip when scanning immediate subfolders for test frameworks.
+ * These are typically build artifacts, dependency caches, virtual environments,
+ * and other directories that never contain top-level project configuration.
+ */
+const SKIP_SUBDIRS = new Set([
+	'node_modules',
+	'.git',
+	'dist',
+	'build',
+	'.next',
+	'.nuxt',
+	'coverage',
+	'__pycache__',
+	'.venv',
+	'venv',
+	'vendor',
+	'.cache',
+	'tmp',
+	'temp',
+]);
+
+/**
+ * Common Python requirements file names checked for pytest (including dev/test variants).
+ * Covers both hyphen and underscore naming conventions.
+ */
+const PYTHON_REQUIREMENTS_FILES = [
+	'requirements.txt',
+	'requirements-dev.txt',
+	'requirements_dev.txt',
+	'requirements-test.txt',
+	'requirements_test.txt',
+];
+
+/**
+ * Detect the test framework used in a single directory (no subfolder scanning).
+ * Checks for requirements.txt and common dev/test requirements file variants
+ * for Python framework detection.
+ */
+async function detectTestFrameworkInDir(
+	baseDir: string,
 ): Promise<TestFramework> {
-	const baseDir = cwd || process.cwd();
 	// Check for package.json to detect JS/TS frameworks
 	try {
 		const packageJsonPath = path.join(baseDir, 'package.json');
@@ -341,7 +379,6 @@ export async function detectTestFramework(
 	try {
 		const pyprojectTomlPath = path.join(baseDir, 'pyproject.toml');
 		const setupCfgPath = path.join(baseDir, 'setup.cfg');
-		const requirementsTxtPath = path.join(baseDir, 'requirements.txt');
 
 		if (fs.existsSync(pyprojectTomlPath)) {
 			const content = fs.readFileSync(pyprojectTomlPath, 'utf-8');
@@ -354,9 +391,13 @@ export async function detectTestFramework(
 			if (content.includes('[pytest]')) return 'pytest';
 		}
 
-		if (fs.existsSync(requirementsTxtPath)) {
-			const content = fs.readFileSync(requirementsTxtPath, 'utf-8');
-			if (content.includes('pytest')) return 'pytest';
+		// Check common requirements files for pytest (including dev/test variants)
+		for (const reqFile of PYTHON_REQUIREMENTS_FILES) {
+			const reqPath = path.join(baseDir, reqFile);
+			if (fs.existsSync(reqPath)) {
+				const content = fs.readFileSync(reqPath, 'utf-8');
+				if (content.includes('pytest')) return 'pytest';
+			}
 		}
 	} catch {
 		// Ignore errors
@@ -409,6 +450,37 @@ export async function detectTestFramework(
 	if (detectDartTest(baseDir)) return 'dart-test';
 	if (detectRSpec(baseDir)) return 'rspec';
 	if (detectMinitest(baseDir)) return 'minitest';
+
+	return 'none';
+}
+
+export async function detectTestFramework(
+	cwd?: string,
+): Promise<TestFramework> {
+	const baseDir = cwd || process.cwd();
+
+	// First, check the root directory
+	const rootFramework = await detectTestFrameworkInDir(baseDir);
+	if (rootFramework !== 'none') return rootFramework;
+
+	// If nothing found at root, scan immediate subdirectories (monorepo support)
+	try {
+		const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (
+				!entry.isDirectory() ||
+				SKIP_SUBDIRS.has(entry.name) ||
+				entry.name.startsWith('.')
+			) {
+				continue;
+			}
+			const subDir = path.join(baseDir, entry.name);
+			const subFramework = await detectTestFrameworkInDir(subDir);
+			if (subFramework !== 'none') return subFramework;
+		}
+	} catch {
+		// Ignore errors
+	}
 
 	return 'none';
 }
